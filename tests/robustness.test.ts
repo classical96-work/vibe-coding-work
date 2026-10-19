@@ -1,0 +1,15 @@
+import {it,expect} from 'vitest';
+import {gzipSync,gunzipSync} from 'fflate';
+import {archiveProject} from './archive';
+import {demoProject,say,text,v,compare} from '../src/demo';
+import {parseEnt} from '../src/parser';
+import {gradeProject,pendingCount} from '../src/grader';
+import {defaultNotebook,validateNotebook} from '../src/store';
+it('gzip + tar + 문자열 script를 실제로 통과한 만점 프로젝트',()=>expect(gradeProject(parseEnt(archiveProject(demoProject()))).performance).toBe(15));
+it('손상된 tar 체크섬은 거부',()=>{const bytes=gunzipSync(archiveProject(demoProject()));bytes[1]^=1;expect(()=>parseEnt(gzipSync(bytes))).toThrow('헤더가 손상');});
+it('잘린 tar 본문은 거부',()=>{const bytes=gunzipSync(archiveProject(demoProject()));expect(()=>parseEnt(gzipSync(bytes.slice(0,600)))).toThrow('잘렸');});
+it('반복 전 정답이라는 말을 해도 정답 분기에 없으면 감점',()=>{const p=demoProject(),t=p.objects[0].script[0];t[3]=say('정답 숫자를 맞춰보세요');t[4].statements![0][2].statements![0].shift();expect(gradeProject(p).performance).toBe(14);});
+it('시작 안내의 크다/작다 단어로 힌트 점수를 주지 않음',()=>{const p=demoProject(),t=p.objects[0].script[0];t[3]=say('크고 작은 숫자를 맞춰보세요');const dir=t[4].statements![0][2].statements![1][0];dir.statements=[[say('안녕')],[say('안녕')]];expect(gradeProject(p).performance).toBe(13);});
+it('정답이 대답보다 크다는 문장은 주어를 뒤집지 않음',()=>{const p=demoProject(),dir=p.objects[0].script[0][4].statements![0][2].statements![1][0];dir.statements=[[say('정답이 대답보다 큽니다')],[say('정답이 대답보다 작습니다')]];expect(gradeProject(p).performance).toBe(15);});
+it('부정형 힌트는 교사 검토',()=>{const p=demoProject(),dir=p.objects[0].script[0][4].statements![0][2].statements![1][0];dir.statements=[[say('그것보다 크지 않아요')],[say('그것보다 작지 않아요')]];expect(pendingCount(gradeProject(p))).toBe(2);});
+it('저장 범위를 넘는 숨겨진 백업 행은 거부',()=>{const n=defaultNotebook();n.classes[7]={99:{name:'범위밖'}};expect(()=>validateNotebook(n)).toThrow();});
