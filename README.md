@@ -28,6 +28,8 @@
 
 ## 채점 범위와 한계
 
+정답 난수는 하한 1, 상한 10으로 설정해야 합니다. 1~100, 0~10 등 다른 범위는 ③ 항목에서 1점 감점하며 별도 중복 감점은 하지 않습니다. 변수·계산식으로 범위를 지정해 자동 확인할 수 없는 경우 교사 검토로 남깁니다. 기존에 저장된 점수는 자동 변경되지 않으므로 학생 파일을 다시 선택해 재채점하세요. 앱 교체나 웹주소 이동 전에는 JSON 백업을 내려받고 새 페이지에서 불러오세요.
+
 수행 15점 + 기본 10점(설정 가능)입니다. 변수 `정답`, `정답횟수`의 공백 차이는 허용합니다. ID가 없는 변수 참조를 이름으로 복구하지 않습니다. 유일한 구조적 별칭을 확인할 수 있으면 변수명 문제는 한 번만 1점 감점해 같은 문제를 항목별로 중복 차감하지 않습니다.
 
 실제 엔트리 형식(gzip → tar → `temp/project.json` → 문자열 `script` 재파싱)을 분석합니다. 시작 스레드·반복문의 구조와 입력이 작음/같음/큼인 경로를 살펴보고 피연산자 순서, 안내 방향, 마지막 정답 입력의 횟수, 종료 후 횟수 안내를 확인합니다. 다른 오브젝트의 정답 숨기기도 검사합니다.
@@ -57,7 +59,7 @@ npm ci --cache /workspace/.npm-cache --no-audit --no-fund
 npm run build
 ```
 
-`dist/index.html` 한 파일에 CSS·JavaScript·아이콘·압축 파서·엑셀 내보내기·분석 Worker가 모두 들어갑니다. 외부 CDN이나 폰트를 불러오지 않습니다. 파일을 직접 열거나 GitHub Pages 등의 HTTPS 정적 호스팅에 올릴 수 있습니다. GitHub Pages는 빌드 결과 `dist`를 배포 대상으로 지정하세요. 이 저장소의 downloads/entry-grading-notebook.zip에서 완성본을 받을 수 있습니다. 공개 웹주소로 앱을 실행하는 호스팅 배포는 별도 단계입니다.
+`dist/index.html` 한 파일에 CSS·JavaScript·아이콘·압축 파서·엑셀 내보내기·분석 Worker가 모두 들어갑니다. 외부 CDN이나 폰트를 불러오지 않습니다. 파일을 직접 열거나 GitHub Pages 등의 HTTPS 정적 호스팅에 올릴 수 있습니다. GitHub Pages는 빌드 결과 `dist`를 배포 대상으로 지정하세요. 이 저장소의 downloads/entry-grading-notebook.zip에서 완성본을 받을 수 있습니다. GitHub Pages 게시용 파일은 gh-pages 브랜치에 둡니다. 아래의 최초 게시 설정이 필요합니다.
 
 로컬 웹서버에서 빌드 결과 확인:
 
@@ -65,7 +67,19 @@ npm run build
 npm run preview
 ```
 
-외부 계정·API 키·Apps Script 설정은 필요 없습니다.
+### 브라우저에서 바로 열기 (GitHub Pages)
+
+앱 사용 주소는 `https://classical96-work.github.io/vibe-coding-work/`입니다. 게시가 활성화되지 않았다면 저장소 관리자가 GitHub **Settings → Pages → Source: Deploy from a branch → Branch: gh-pages → /(root) → Save**로 게시를 활성화할 수 있습니다. 설정 화면: https://github.com/classical96-work/vibe-coding-work/settings/pages
+
+이후 새 버전을 게시하려면 저장소에서 다음 명령을 명시적으로 실행합니다. 빌드 결과의 `index.html`과 `.nojekyll`만 게시하며, 현재 작업 브랜치·소스 파일을 유지합니다. 기존 배포 커밋을 이어받고 강제 푸시는 사용하지 않습니다.
+
+```sh
+npm run publish:pages
+```
+
+GitHub 저장소 쓰기 권한이 필요합니다. 사이트 게시 여부와 HTTPS 응답 확인은 별도로 해야 합니다. 학생 파일·명단·성적은 게시하지 않습니다. PC의 로컬 HTML에서 사용하던 기록은 먼저 JSON 백업을 내려받아 웹주소에서 불러오세요. 주소가 바뀌면 브라우저 저장 영역도 달라집니다.
+
+앱 사용에는 외부 계정·API 키·Apps Script 설정이 필요 없습니다.
 
 ### 검증
 

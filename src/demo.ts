@@ -9,7 +9,7 @@ export function demoProject(): Project {
     variables:[{id:'secret',name:'정답',visible:true,value:0,variableType:'variable'},{id:'count',name:'정답횟수',value:0,visible:true,variableType:'variable'}],
     objects:[{name:'선생님',script:[[
       b('when_run_button_click',[null]), b('hide_variable',['secret',null]),
-      b('set_variable',['secret',b('calc_rand',[null,text(1),null,text(100),null]),null]),
+      b('set_variable',['secret',b('calc_rand',[null,text(1),null,text(10),null]),null]),
       say('내가 생각한 숫자를 맞춰보세요!'),
       b('repeat_inf',[null,null],[[
         b('ask_and_wait',[text('숫자를 입력해 주세요'),null]),

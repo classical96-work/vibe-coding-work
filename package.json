@@ -1,6 +1,6 @@
 {
   "name": "entry-grading-notebook",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -8,7 +8,8 @@
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
-    "test:ui": "node scripts/browser-smoke.mjs"
+    "test:ui": "node scripts/browser-smoke.mjs",
+    "publish:pages": "npm run build && node scripts/publish-pages.mjs"
   },
   "dependencies": {
     "exceljs": "^4.4.0",

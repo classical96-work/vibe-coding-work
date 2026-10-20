@@ -1,6 +1,6 @@
 import type { Block, Criterion, Grade, Project, Variable } from './types';
 import { expressionBlocks, isBlock, literal, walk } from './parser';
-const labels = ['시작 버튼으로 게임 시작','정답 변수 숨기기','난수를 정답에 저장','정답횟수 0으로 초기화','숫자맞추기 시작 안내','반복 안에서 숫자 입력','정답일 때 정답 안내','입력이 작을 때 큰 수 안내','입력이 클 때 작은 수 안내','모든 입력의 횟수 +1','종료 후 시도 횟수 안내','오답이면 계속 반복','정답이면 반복 종료'];
+const labels = ['시작 버튼으로 게임 시작','정답 변수 숨기기','1~10 난수를 정답에 저장','정답횟수 0으로 초기화','숫자맞추기 시작 안내','반복 안에서 숫자 입력','정답일 때 정답 안내','입력이 작을 때 큰 수 안내','입력이 클 때 작은 수 안내','모든 입력의 횟수 +1','종료 후 시도 횟수 안내','오답이면 계속 반복','정답이면 반복 종료'];
 export const numerals = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬'];
 const compact = (s: string) => s.replace(/\s/g, '');
 const params = (b: Block) => b.params ?? [];
@@ -95,6 +95,18 @@ export function gradeProject(project: Project, base = 10): Grade {
   const secretSets = before.filter(b => b.type === 'set_variable' && isVar(b, secret));
   const lastSecret = secretSets.at(-1);
   if (!lastSecret || !isBlock(params(lastSecret)[1]) || (params(lastSecret)[1] as Block).type !== 'calc_rand') fail(3,'난수를 정답 변수에 저장하지 않음');
+  else {
+    // Entry calc_rand uses params[1] and params[3] for the lower and upper bounds.
+    const random = params(lastSecret)[1] as Block;
+    const lower = params(random)[1], upper = params(random)[3];
+    const dynamic = (v: unknown) => isBlock(v) && !['number','text'].includes(v.type);
+    const number = (v: unknown): number => {
+      const value = isBlock(v) ? params(v)[0] : v;
+      return (typeof value === 'number' || typeof value === 'string') && String(value).trim() !== '' ? Number(value) : NaN;
+    };
+    if (dynamic(lower) || dynamic(upper)) review(3,'정답 난수 범위가 1~10인지 자동 확인할 수 없습니다. 다른 범위이면 1점 감점해 주세요.');
+    else if (number(lower) !== 1 || number(upper) !== 10) fail(3,`정답 난수 범위가 1~10이 아님(설정값 ${literal(lower) || '없음'}~${literal(upper) || '없음'})`);
+  }
   const resets = before.filter(b => b.type === 'set_variable' && isVar(b, counter));
   const initial = resets.at(-1);
   const initialValue = initial ? literal(params(initial)[1]) : counter?.value;
