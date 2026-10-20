@@ -1,6 +1,8 @@
 import type { Block, Criterion, Grade, Project, Variable } from './types';
 import { expressionBlocks, isBlock, literal, walk } from './parser';
 const labels = ['시작 버튼으로 게임 시작','정답 변수 숨기기','1~10 난수를 정답에 저장','정답횟수 0으로 초기화','숫자맞추기 시작 안내','반복 안에서 숫자 입력','정답일 때 정답 안내','입력이 작을 때 큰 수 안내','입력이 클 때 작은 수 안내','모든 입력의 횟수 +1','종료 후 시도 횟수 안내','오답이면 계속 반복','정답이면 반복 종료'];
+export const ENGINE_VERSION = '1.2.0';
+export const needsRegrade = (grade: Grade) => grade.engineVersion !== ENGINE_VERSION;
 export const numerals = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬'];
 const compact = (s: string) => s.replace(/\s/g, '');
 const params = (b: Block) => b.params ?? [];
@@ -8,7 +10,7 @@ const ref = (v: unknown): string | undefined => isBlock(v) && v.type === 'get_va
 const speak = (b: Block) => ['dialog_time','dialog'].includes(b.type) && !params(b).includes('think');
 const says = (bs: Block[]) => bs.filter(speak).map(b => literal(params(b)[0]));
 const contains = (b: Block, t: string) => expressionBlocks(params(b)[0]).some(e => e.type === t);
-interface Trace { events: Block[]; stopped: boolean; uncertain: boolean }
+interface Trace { events: Block[]; stopped: boolean; uncertain: boolean; compared: boolean }
 function comparison(v: unknown) {
   if (!isBlock(v) || v.type !== 'boolean_basic_operator') return undefined;
   const p = params(v);
@@ -16,7 +18,7 @@ function comparison(v: unknown) {
   return { left: p[0], op: String(p[1]), right: p[2] };
 }
 function paths(blocks: Block[], relation: -1 | 0 | 1, secretId?: string): Trace[] {
-  let traces: Trace[] = [{ events: [], stopped: false, uncertain: false }];
+  let traces: Trace[] = [{ events: [], stopped: false, uncertain: false, compared: false }];
   for (const b of blocks) {
     const next: Trace[] = [];
     for (const t of traces) {
@@ -26,18 +28,20 @@ function paths(blocks: Block[], relation: -1 | 0 | 1, secretId?: string): Trace[
       if (['if_else','_if'].includes(b.type)) {
         const c = comparison(params(b)[0]);
         let truth: boolean | undefined;
+        let compared = false;
         if (c) {
           const leftAnswer = isBlock(c.left) && c.left.type === 'get_canvas_input_value';
           const rightAnswer = isBlock(c.right) && c.right.type === 'get_canvas_input_value';
           // Invalid variable references are penalized by their comparison criteria. Trace the intended control shape separately.
           if ((leftAnswer && ref(c.right)) || (rightAnswer && ref(c.left))) {
+            compared = leftAnswer ? ref(c.right) === secretId : ref(c.left) === secretId;
             const order = leftAnswer ? relation : -relation;
             truth = c.op === 'EQUAL' ? order === 0 : c.op === 'GREATER' ? order > 0 : order < 0;
           }
         }
         const branches = truth === undefined ? [0, 1] : [truth ? 0 : 1];
         for (const i of branches) {
-          for (const sub of paths(b.statements?.[i] ?? [], relation, secretId)) next.push({ events: [...events, ...sub.events], stopped: sub.stopped, uncertain: t.uncertain || sub.uncertain || truth === undefined });
+          for (const sub of paths(b.statements?.[i] ?? [], relation, secretId)) next.push({ events: [...events, ...sub.events], stopped: sub.stopped, uncertain: t.uncertain || sub.uncertain || truth === undefined, compared: t.compared || compared || sub.compared });
         }
       } else next.push({ ...t, events });
     }
@@ -51,13 +55,13 @@ export function recalculate(grade: Grade): Grade {
   const deductions = grade.criteria.reduce((n, c) => n + (c.decision === 'accept' ? 0 : c.decision === 'deduct' ? c.max : c.deduction), 0);
   const performance = Math.max(0, 15 - namingPenalty - deductions);
   const reasons = [...grade.naming, ...grade.criteria.filter(c => c.decision === 'deduct' || (c.decision !== 'accept' && c.deduction > 0)).map(c => `${numerals[c.id - 1]} ${c.reason}${c.decision === 'deduct' && c.deduction === 0 ? ' (교사 감점)' : ''}`)];
-  return { ...grade, performance, total: performance + grade.base, reasons: reasons.join('\n') || 'Perfect' };
+  return { ...grade, performance, total: performance + grade.base, reasons: reasons.join('\n') || (pendingCount(grade) ? '검토 필요 (확정 전)' : 'Perfect') };
 }
-export function pendingCount(grade: Grade): number { return grade.criteria.filter(c => c.review && !c.decision).length + (!grade.acknowledged ? grade.notices.length : 0); }
+export function pendingCount(grade: Grade): number { return grade.criteria.filter(c => c.review && !c.decision).length + (!grade.acknowledged ? grade.notices.length : 0) + (needsRegrade(grade) ? 1 : 0); }
 export function gradeProject(project: Project, base = 10): Grade {
   const criteria: Criterion[] = labels.map((label, i) => ({ id: i + 1, label, max: [4,9].includes(i) ? 2 : 1, deduction: 0, reason: label }));
   const fail = (id: number, reason: string, amount?: number) => { const c = criteria[id - 1]; c.deduction = amount ?? c.max; c.reason = reason; };
-  const review = (id: number, message: string) => { criteria[id - 1].review = message; criteria[id - 1].deduction = 0; criteria[id - 1].reason = message; };
+  const review = (id: number, message: string) => { criteria[id - 1].review = message; if (!criteria[id - 1].deduction) criteria[id - 1].reason = message; };
   const notices: string[] = [];
   const variables = project.variables.filter(v => !['timer','answer'].includes(v.variableType ?? ''));
   const byId = new Map(variables.map(v => [v.id, v]));
@@ -123,18 +127,20 @@ export function gradeProject(project: Project, base = 10): Grade {
     if (!c || !secret) return false;
     return (ref(c.left) === secret.id && isBlock(c.right) && c.right.type === 'get_canvas_input_value') || (ref(c.right) === secret.id && isBlock(c.left) && c.left.type === 'get_canvas_input_value');
   };
-  const eqBlocks = walk(body).filter(b => ['if_else','_if'].includes(b.type) && comparison(params(b)[0])?.op === 'EQUAL');
-  const hasEq = eqBlocks.some(b => validComparison(params(b)[0]));
   const directionBlocks = walk(body).filter(b => ['if_else','_if'].includes(b.type) && ['GREATER','LESS'].includes(comparison(params(b)[0])?.op ?? ''));
   const goodDirections = directionBlocks.length > 0 && directionBlocks.every(b => validComparison(params(b)[0]));
   const wrongLow = paths(body, -1, secret?.id), correct = paths(body, 0, secret?.id), wrongHigh = paths(body, 1, secret?.id);
   const allPaths = [...wrongLow, ...correct, ...wrongHigh];
   if (!loop || !allPaths.every(p => p.events.some(b => b.type === 'ask_and_wait'))) fail(6,'반복 안에 숫자 입력(묻고 기다리기) 없음');
-  const correctSpeech = new Set(eqBlocks.filter(b => validComparison(params(b)[0])).flatMap(b => walk(b.statements?.[0] ?? []).filter(speak)));
-  if (!hasEq || !correct.every(p => says(p.events.filter(b => correctSpeech.has(b))).some(s => /정답/.test(s) && !/아니|아닙|오답|틀렸/.test(s)))) fail(7,'정답 분기의 정답 안내 또는 유효한 정답 비교 없음');
+  // A correct branch can be the remaining else after LESS and GREATER.
+  // Its positive message must be reachable for equality and absent from both wrong-input paths.
+  const wrongSpeech = new Set([...wrongLow, ...wrongHigh].flatMap(p => p.events.filter(speak)));
+  const correctPhrase = (b: Block) => speak(b) && /정답/.test(literal(params(b)[0])) && !/아니|아닙|오답|틀렸/.test(literal(params(b)[0]));
+  const correctNotice = (p: Trace) => p.compared && p.events.some(b => correctPhrase(b) && !wrongSpeech.has(b));
+  if (!correct.every(correctNotice)) fail(7,'정답 분기의 정답 안내 또는 유효한 정답 비교 없음');
   const direction = (s: string): -1 | 0 | 1 | undefined => {
     const text = compact(s);
-    if (/^(큼|작음)[.!~]*$/.test(text) || /않|아니|아닙|말고/.test(text)) return 0;
+    if (/^(큼|작음)[.!~]*$/.test(text) || /^정답보다/.test(text) || /않|아니|아닙|말고/.test(text)) return 0;
     const big = /큽|크|커|큰|높/.test(text), small = /작|낮/.test(text);
     if (big === small) return undefined;
     const d = big ? 1 : -1;
@@ -164,17 +170,29 @@ export function gradeProject(project: Project, base = 10): Grade {
   if (!loop || ![...wrongLow,...wrongHigh].every(p => !p.stopped)) fail(12,'오답에서 반복이 종료되거나 반복문 없음');
   if (!loop || !correct.every(p => p.stopped)) fail(13,'정답 분기에 반복 종료 없음');
   if (allPaths.some(p => p.uncertain)) {
-    for (const id of [6,7,8,9,10,12,13]) review(id,'지원하지 않는 조건식이 포함되어 실행 경로를 확정할 수 없습니다. 직접 확인해 주세요.');
+    // A mixed result from speculative branches is not a proven deduction.
+    const checks: [number, Trace[], (p: Trace) => boolean][] = [
+      [6,allPaths,p => p.events.some(b => b.type === 'ask_and_wait')],
+      [7,correct,correctNotice],
+      [8,wrongLow,p => hints(p).includes(1) && !hints(p).includes(-1)],
+      [9,wrongHigh,p => hints(p).includes(-1) && !hints(p).includes(1)],
+      [10,allPaths,inputCount],[12,[...wrongLow,...wrongHigh],p => !p.stopped],[13,correct,p => p.stopped],
+    ];
+    for (const [id,traces,check] of checks) {
+      if (!traces.some(p => p.uncertain)) continue;
+      if (traces.some(check) && (![8,9].includes(id) || goodDirections)) criteria[id - 1].deduction = 0;
+      if (id === 7 && walk(body).some(correctPhrase)) criteria[6].deduction = 0;
+      review(id,'지원하지 않는 조건식이 포함되어 실행 경로를 확정할 수 없습니다. 직접 확인해 주세요.');
+    }
   }
   const supported = new Set(['when_run_button_click','hide_variable','show_variable','set_variable','change_variable','dialog_time','dialog','repeat_inf','ask_and_wait','if_else','_if','stop_repeat','set_visible_answer']);
   const unknown = [...new Set(all.filter(b => !supported.has(b.type)).map(b => b.type))];
   if (unknown.length) {
     notices.push(`자동 분석 범위 밖의 블록: ${unknown.join(', ').slice(0,1000)}. 실행 흐름에 미치는 영향을 확인해 주세요.`);
-    for (const c of criteria) if (!c.review) review(c.id,'지원 범위 밖의 블록이 있어 자동 확정할 수 없습니다. 의사코드를 확인해 주세요.');
   }
   if (loop && loopIndex < 0) {
     notices.push('게임 반복문이 조건문 안에 있습니다. 시작 시 실제 실행되는지 확인해 주세요.');
     for (const id of [3,4,5,11]) review(id,'반복문이 중첩되어 시작·종료 순서의 수동 확인이 필요합니다.');
   }
-  return recalculate({criteria,naming,notices,performance:15,base,total:15+base,reasons:''});
+  return recalculate({engineVersion:ENGINE_VERSION,criteria,naming,notices,performance:15,base,total:15+base,reasons:''});
 }

@@ -2,9 +2,9 @@ import './style.css';
 import AnalysisWorker from './analysis.worker?worker&inline';
 import { createIcons, BookOpenCheck, UploadCloud, ShieldCheck, LayoutGrid, TableProperties, ClipboardCheck, Download, ChevronDown, ArrowUpRight, X, FileArchive, FolderOpen, Info, SlidersHorizontal, Check, TriangleAlert, ArrowRight, RotateCcw, DatabaseBackup, CircleHelp, CheckCheck, Menu, LockKeyhole, Search, CloudOff, FileSpreadsheet, ListChecks, ChevronRight, Sparkles, CircleCheck, LoaderCircle, FileUp } from 'lucide';
 import { demoProject } from './demo';
-import { gradeProject, numerals, pendingCount, recalculate } from './grader';
+import { gradeProject, numerals, pendingCount, recalculate, needsRegrade } from './grader';
 import { MAX_FILE_BYTES, parseStudent, pseudocode } from './parser';
-import { BrowserScoreStore, defaultNotebook, STORE_KEY, validateNotebook } from './store';
+import { BrowserScoreStore, defaultNotebook, validateNotebook } from './store';
 import { download, exportScores } from './export';
 import type { Grade, Notebook, ScoreRow, Submission } from './types';
 const icons = {BookOpenCheck,UploadCloud,ShieldCheck,LayoutGrid,TableProperties,ClipboardCheck,Download,ChevronDown,ArrowUpRight,X,FileArchive,FolderOpen,Info,SlidersHorizontal,Check,TriangleAlert,ArrowRight,RotateCcw,DatabaseBackup,CircleHelp,CheckCheck,Menu,LockKeyhole,Search,CloudOff,FileSpreadsheet,ListChecks,ChevronRight,Sparkles,CircleCheck,LoaderCircle,FileUp};
@@ -13,17 +13,33 @@ const h = (v: unknown) => String(v ?? '').replace(/[&<>"']/g,c=>({'&':'&amp;','<
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const store = new BrowserScoreStore();
 let notebook: Notebook = defaultNotebook(), storageBlocked = false, saveError = '', saveTime = '';
-try { notebook = store.load() ?? notebook; } catch { storageBlocked = true; saveError = '기존 저장 데이터를 읽지 못했습니다. 원본은 보존했으며 새 변경은 저장되지 않습니다. 백업을 내보낸 뒤 사용 안내에서 초기화하거나 정상 백업을 불러와 주세요.'; }
 let view: 'grading'|'book'|'reviews'|'help' = 'grading';
 let activeClass = 1, recordMode = false, query = '', busy = false, progress = '', menuOpen = false;
 let results: Submission[] = [];
 let errors: {name:string;message:string}[] = [];
 let modal: {type:'detail'|'student'|'roster'|'settings'|'export';key?:string} | undefined;
 let previousFocus: HTMLElement | null = null;
-function persist(change = true) {
+let pendingSaves = 0;
+let saveQueue: Promise<void> = Promise.resolve();
+function saveStatus() {
+  return `${icon(saveError?'triangle-alert':pendingSaves?'loader-circle':'cloud-off')} ${saveError?'저장 실패 · 백업이 필요해요':pendingSaves?'브라우저 저장 중…':saveTime?`이 브라우저에 저장됨 · ${saveTime}`:'서버 전송 없이, 이 브라우저에서만'}`;
+}
+function refreshPersistenceUI() {
+  const status=document.querySelector('#save-status'); if(status)status.innerHTML=saveStatus();
+  const feedback=document.querySelector('#save-feedback'); if(feedback)feedback.innerHTML=saveError?`<div class="banner error" role="alert">${icon('triangle-alert')}<span>${h(saveError)}</span></div>`:'';
+  createIcons({icons,attrs:{'stroke-width':1.8}});
+}
+function persist(change = true): Promise<void> {
   if (change) notebook.revision++;
-  try { if(storageBlocked) throw new Error('기존 데이터 보호 중'); store.save(notebook); saveError=''; saveTime=new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'}); }
-  catch { saveError = storageBlocked ? saveError : '브라우저 저장에 실패했습니다. 저장 공간·비공개 모드 설정을 확인하고 지금 JSON 백업을 내려받아 주세요.'; }
+  const snapshot=structuredClone(notebook); pendingSaves++;
+  saveQueue=saveQueue.then(async()=>{
+    try {
+      if(storageBlocked)throw new Error('기존 데이터 보호 중');
+      await store.save(snapshot); saveError=''; saveTime=new Date().toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
+    } catch { saveError=storageBlocked?saveError:'브라우저 저장에 실패했습니다. 저장 공간·비공개 모드 설정을 확인하고 지금 JSON 백업을 내려받아 주세요.'; }
+    finally { pendingSaves--;refreshPersistenceUI(); }
+  });
+  return saveQueue;
 }
 function rowAt(c: number,n: number): ScoreRow { return notebook.classes[c]?.[n] ?? {name:''}; }
 function setRow(c: number,n: number,r: ScoreRow) { notebook.classes[c] ??= {}; notebook.classes[c][n]=r; }
@@ -67,15 +83,16 @@ function render() {
       <nav aria-label="주 메뉴">${nav('grading','간편 채점','layout-grid')}${nav('book','반별 성적표','table-properties')}${nav('reviews','검토함','clipboard-check',pending)}</nav>
       <div class="sidebar-divider"></div><nav aria-label="도움말">${nav('help','사용 안내','circle-help')}</nav>
       <div class="sidebar-bottom"><div class="privacy-icon">${icon('shield-check')}</div><strong>학생의 작품은 여기에서만.</strong><p>모든 파일은 이 브라우저에서 분석돼요.<br>외부 서버로 전송하지 않습니다.</p><span class="privacy-pill"><span class="status-dot"></span> 로컬 처리 · 계정 연결 없음</span></div>
-      <div class="sidebar-footer">ENTRY GRADING NOTE <span>v1.1</span></div>
+      <div class="sidebar-footer">ENTRY GRADING NOTE <span>v1.2</span></div>
     </aside>
     <div class="shell"><header class="topbar"><div class="breadcrumb"><button class="icon-button mobile-menu" data-action="menu" aria-label="메뉴 열기">${icon('menu')}</button><span>워크스페이스</span>${icon('chevron-right')}<strong>${({grading:'간편 채점',book:'반별 성적표',reviews:'검토함',help:'사용 안내'})[view]}</strong></div><div class="topbar-right"><span class="local-status">${icon('lock-keyhole')} 내 브라우저 전용</span><span class="avatar">T</span></div></header>
     <main>
       <div class="page-heading"><div><div class="eyebrow">${view==='grading'?'LESS PAPERWORK, MORE TEACHING':view==='book'?'YOUR CLASS, AT A GLANCE':view==='reviews'?'A TEACHER’S FINAL SAY':'A LITTLE HELP TO GET STARTED'}</div><h1>${({grading:'숫자맞추기, 채점은 가볍게.',book:'우리 반 성적표',reviews:'한 번 더 살펴볼 작품',help:'채점노트 사용 안내'})[view]}</h1><p>${({grading:'엔트리 파일을 놓아 주세요. 꼼꼼한 채점과 기록은 채점노트가 도와드릴게요.',book:'채점 결과를 모으고, 필요한 내용은 직접 수정하세요.',reviews:'모호한 판정은 선생님의 판단으로 완성해 주세요.',help:'파일 선택부터 성적표 백업까지, 차근차근 시작해 보세요.'})[view]}</p></div><button class="button secondary backup-button" data-action="backup">${icon('database-backup')} 백업 내보내기</button></div>
-      ${saveError?`<div class="banner error" role="alert">${icon('triangle-alert')}<span>${h(saveError)}</span></div>`:''}
+      <div id="save-feedback">${saveError?`<div class="banner error" role="alert">${icon('triangle-alert')}<span>${h(saveError)}</span></div>`:''}</div>
+      ${allSaved().some(s=>needsRegrade(s.grade))?'<div class="banner warning" role="alert">이전 버전의 채점 결과가 있습니다. 기존 점수는 잠정 값입니다. 원본 학생 파일을 다시 선택해 재채점해 주세요.</div>':''}
       <div class="backup-reminder ${notebook.revision>notebook.backedUpRevision?'changed':''}">${icon(notebook.revision>notebook.backedUpRevision?'info':'shield-check')}<span>${notebook.revision>notebook.backedUpRevision?'<strong>백업하지 않은 변경이 있어요.</strong> 성적표를 안전하게 보관하려면 JSON 백업을 내려받아 주세요.':'성적표는 이 브라우저에 저장됩니다. 사이트 데이터를 지우면 사라지므로 정기적으로 백업해 주세요.'}</span><button class="text-button" data-action="restore">백업 불러오기 ${icon('arrow-up-right')}</button></div>
       ${view==='grading'?gradingView():view==='book'?bookView(saved):view==='reviews'?reviewView():helpView()}
-      <footer class="main-footer"><span>${icon(saveError?'triangle-alert':'cloud-off')} ${saveError?'저장 실패 · 백업이 필요해요':saveTime?`이 브라우저에 저장됨 · ${saveTime}`:'서버 전송 없이, 이 브라우저에서만'}</span><span>조금 더 수업에 집중할 수 있도록.</span></footer>
+      <footer class="main-footer"><span id="save-status" role="status">${saveStatus()}</span><span>조금 더 수업에 집중할 수 있도록.</span></footer>
     </main></div><input type="file" id="ent-files" accept=".ent" multiple hidden><input type="file" id="restore-file" accept=".json,application/json" hidden><div id="modal-root"></div>`;
   createIcons({icons,attrs:{'stroke-width':1.8}});
   document.querySelector<HTMLInputElement>('#ent-files')!.onchange=e=>{void processFiles((e.target as HTMLInputElement).files);};
@@ -93,7 +110,7 @@ function stats(items: Submission[]) {
 }
 function gradingView() {
   const filtered=results.filter(s=>(!s.student||s.student.classNo===activeClass) && (!query||[displayName(s),s.fileName,s.student?.id].join(' ').includes(query)));
-  return `<section class="upload-section" aria-label="파일 채점"><div class="section-top"><div class="section-title"><span class="step-number">01</span><h2>학생 작품 가져오기</h2></div><span class="subtle">.ent 파일 · 여러 개 선택 가능 · 파일당 25MB</span></div>
+  return `<section class="upload-section" aria-label="파일 채점"><div class="section-top"><div class="section-title"><span class="step-number">01</span><h2>학생 작품 가져오기</h2></div><span class="subtle">.ent 파일 · 최대 1,000개 · 파일당 25MB</span></div>
     <div class="dropzone ${busy?'is-busy':''}" tabindex="0" role="button" aria-label="엔트리 파일 선택" aria-disabled="${busy}" data-action="upload"><div class="drop-illustration">${icon(busy?'loader-circle':'upload-cloud',busy?'spin':'')}</div><h3>${busy?h(progress):'여기에 엔트리 파일을 놓아 주세요'}</h3><p>${busy?'학생 작품을 브라우저 안에서 분석하고 있어요.':'파일을 끌어다 놓거나 아래 버튼으로 선택할 수 있어요.'}</p><span class="button primary">${icon('folder-open')} 파일 선택하기</span><div class="drop-footnote">${icon('shield-check')} 파일은 서버로 전송되지 않아요</div></div>
     <div class="upload-options"><div class="mode-control"><span>채점 모드</span><div class="segmented"><button class="${!recordMode?'active':''}" data-action="mode" data-mode="only" aria-pressed="${!recordMode}" ${busy?'disabled':''}>채점만</button><button class="${recordMode?'active':''}" data-action="mode" data-mode="record" aria-pressed="${recordMode}" ${busy?'disabled':''}>채점 후 성적표에 기록</button></div></div><button class="settings-link" data-action="settings">${icon('sliders-horizontal')} 기본점수 <strong>${notebook.settings.base}점</strong></button></div>
     <div class="try-demo">${icon('sparkles')}<span>처음 사용하시나요? 예시 작품으로 먼저 둘러보세요.</span><button class="text-button" data-action="demo" ${busy?'disabled':''}>예시로 체험하기 ${icon('arrow-right')}</button></div>
@@ -115,9 +132,9 @@ function bookView(saved: Submission[]) {
 }
 function reviewView(){
   const items=allSubmissions().filter(s=>pendingCount(s.grade)>0);
-  return `<section class="panel"><div class="panel-heading"><div><h2>검토 대기 <span class="count-badge">${items.length}</span></h2><p>모호한 항목은 우선 감점하지 않았습니다. 현재 점수는 잠정 점수입니다.</p></div></div>${items.length?`<div class="review-list">${items.map(s=>`<button class="review-card" data-action="detail" data-key="${h(s.key)}"><span class="review-card-icon">${icon('clipboard-check')}</span><span><strong>${h(s.student?`${s.student.classNo}반 ${s.student.number}번 ${displayName(s)}`:s.fileName)}</strong><small>${h([...s.grade.criteria.filter(c=>c.review&&!c.decision).map(c=>c.label),...(!s.grade.acknowledged?s.grade.notices:[])].join(' · '))}</small></span><span class="badge amber">${pendingCount(s.grade)}건</span>${icon('chevron-right')}</button>`).join('')}</div>`:`<div class="empty-state"><span class="empty-icon green">${icon('check-check')}</span><h3>검토할 작품이 없어요</h3><p>추가 확인이 필요한 작품이 생기면 이곳에 모아 드릴게요.</p></div>`}</section>`;
+  return `<section class="panel"><div class="panel-heading"><div><h2>검토 대기 <span class="count-badge">${items.length}</span></h2><p>모호한 항목은 우선 감점하지 않았습니다. 현재 점수는 잠정 점수입니다.</p></div></div>${items.length?`<div class="review-list">${items.map(s=>`<button class="review-card" data-action="detail" data-key="${h(s.key)}"><span class="review-card-icon">${icon('clipboard-check')}</span><span><strong>${h(s.student?`${s.student.classNo}반 ${s.student.number}번 ${displayName(s)}`:s.fileName)}</strong><small>${h([...(needsRegrade(s.grade)?['이전 버전 · 원본 재채점 필요']:[]),...s.grade.criteria.filter(c=>c.review&&!c.decision).map(c=>c.label),...(!s.grade.acknowledged?s.grade.notices:[])].join(' · '))}</small></span><span class="badge amber">${pendingCount(s.grade)}건</span>${icon('chevron-right')}</button>`).join('')}</div>`:`<div class="empty-state"><span class="empty-icon green">${icon('check-check')}</span><h3>검토할 작품이 없어요</h3><p>추가 확인이 필요한 작품이 생기면 이곳에 모아 드릴게요.</p></div>`}</section>`;
 }
-function helpView(){return `<div class="help-grid"><section class="panel help-card"><h2>처음이라면, 이렇게 시작하세요</h2><ol class="help-steps"><li><b>01</b><div><strong>학생 파일을 선택하세요</strong><p>엔트리에서 저장한 .ent 파일을 여러 개 선택할 수 있어요. 파일명은 <code>20712_홍길동.ent</code>처럼 학번과 이름을 포함해 주세요.</p></div></li><li><b>02</b><div><strong>채점 결과를 확인하세요</strong><p>행을 누르면 13개 항목별 판정과 의사코드를 볼 수 있어요. ‘검토 필요’는 인정 또는 감점으로 결정해 주세요. 지원 범위 밖의 블록은 수동 검토가 필요합니다.</p></div></li><li><b>03</b><div><strong>성적표에 기록하고 백업하세요</strong><p>채점만 모드는 결과를 저장하지 않아요. 기록 모드 또는 상세 화면의 ‘성적표에 기록’을 사용하세요. JSON 백업은 다른 PC에서 불러올 수 있어요.</p></div></li></ol></section><section class="panel help-card"><span class="help-big-icon">${icon('shield-check')}</span><h2>저장 위치를 꼭 기억해 주세요</h2><p>학생 파일은 외부로 전송되지 않습니다. 성적표·명단·검토 결과는 이 PC의 이 브라우저와 현재 사이트 주소에 저장돼요.</p><p><strong>브라우저 사이트 데이터 삭제·비공개 모드 종료·사이트 주소 변경 시 데이터가 사라지거나 보이지 않을 수 있습니다.</strong> 주기적으로 JSON 백업을 내려받으세요. 엑셀 파일은 성적표 공유용이며 검토 기록 복원은 JSON 백업을 사용해 주세요.</p><button class="button secondary" data-action="backup">${icon('database-backup')} JSON 백업 내보내기</button></section><section class="panel help-card"><h2>채점 기준</h2><p>수행 15점에 기본점수(기본 10점)를 더합니다. 필수 변수명은 ‘정답’과 ‘정답횟수’이며 공백은 허용합니다. 변수명 문제는 한 번만 1점 감점해요.</p><p>정답은 1~10 난수를 저장해야 합니다. 다른 범위는 ③ 항목에서 1점 감점합니다. 크기 비교의 피연산자 순서, 마지막 정답 입력의 횟수 포함 여부, 정답·오답 분기의 종료도 확인합니다. 임의의 엔트리 프로그램 전체를 실행하는 도구는 아니므로 최종 성적 확정 전 교사 검토가 필요합니다.</p><p>성적표는 한 학년용입니다. 학년을 바꾸려면 먼저 백업하고 새 성적표를 시작하세요.</p></section><section class="panel help-card"><h2>데이터 관리</h2><p>JSON 백업은 학생 이름과 성적을 포함하므로 학교의 자료 관리 기준에 맞게 보관해 주세요.</p><div class="help-buttons"><button class="button secondary" data-action="restore">${icon('file-up')} 백업 불러오기</button><button class="button secondary" data-action="raw-backup">저장 원본 내려받기</button></div><button class="text-button danger" data-action="reset">새 성적표 시작하기</button></section></div>`;}
+function helpView(){return `<div class="help-grid"><section class="panel help-card"><h2>처음이라면, 이렇게 시작하세요</h2><ol class="help-steps"><li><b>01</b><div><strong>학생 파일을 선택하세요</strong><p>엔트리에서 저장한 .ent 파일을 여러 개 선택할 수 있어요. 파일명은 <code>20712_홍길동.ent</code>처럼 학번과 이름을 포함해 주세요.</p></div></li><li><b>02</b><div><strong>채점 결과를 확인하세요</strong><p>행을 누르면 13개 항목별 판정과 의사코드를 볼 수 있어요. ‘검토 필요’는 인정 또는 감점으로 결정해 주세요. 추가 블록 때문에 기존 감점이 사라지지는 않아요. 지원 범위 밖의 블록은 구조를 직접 확인해 주세요.</p></div></li><li><b>03</b><div><strong>성적표에 기록하고 백업하세요</strong><p>채점만 모드는 결과를 저장하지 않아요. 기록 모드 또는 상세 화면의 ‘성적표에 기록’을 사용하세요. JSON 백업은 다른 PC에서 불러올 수 있어요.</p></div></li></ol></section><section class="panel help-card"><span class="help-big-icon">${icon('shield-check')}</span><h2>저장 위치를 꼭 기억해 주세요</h2><p>학생 파일은 외부로 전송되지 않습니다. 성적표·명단·검토 결과는 이 PC의 이 브라우저와 현재 사이트 주소의 IndexedDB에 저장돼요. 이전 localStorage 기록은 원본을 보존하며 자동으로 옮깁니다.</p><p><strong>브라우저 사이트 데이터 삭제·비공개 모드 종료·사이트 주소 변경 시 데이터가 사라지거나 보이지 않을 수 있습니다.</strong> 주기적으로 JSON 백업을 내려받으세요. 엑셀 파일은 성적표 공유용이며 검토 기록 복원은 JSON 백업을 사용해 주세요.</p><button class="button secondary" data-action="backup">${icon('database-backup')} JSON 백업 내보내기</button></section><section class="panel help-card"><h2>채점 기준</h2><p>수행 15점에 기본점수(기본 10점)를 더합니다. 필수 변수명은 ‘정답’과 ‘정답횟수’이며 공백은 허용합니다. 변수명 문제는 한 번만 1점 감점해요.</p><p>정답은 1~10 난수를 저장해야 합니다. 다른 범위는 ③ 항목에서 1점 감점합니다. 크기 비교의 피연산자 순서, 마지막 정답 입력의 횟수 포함 여부, 정답·오답 분기의 종료도 확인합니다. 임의의 엔트리 프로그램 전체를 실행하는 도구는 아니므로 최종 성적 확정 전 교사 검토가 필요합니다.</p><p>성적표는 한 학년용입니다. 학년을 바꾸려면 먼저 백업하고 새 성적표를 시작하세요.</p></section><section class="panel help-card"><h2>데이터 관리</h2><p>JSON 백업은 학생 이름과 성적을 포함하므로 학교의 자료 관리 기준에 맞게 보관해 주세요.</p><div class="help-buttons"><button class="button secondary" data-action="restore">${icon('file-up')} 백업 불러오기</button><button class="button secondary" data-action="raw-backup">저장 원본 내려받기</button></div><button class="text-button danger" data-action="reset">새 성적표 시작하기</button></section></div>`;}
 function renderModal(){
   const root=document.querySelector<HTMLElement>('#modal-root')!;
   if(!modal){root.innerHTML='';return;}
@@ -128,13 +145,14 @@ function renderModal(){
     const row=s.student?rowAt(s.student.classNo,s.student.number):undefined;
     const manual=recorded(s)&&(row?.performance!==s.grade.performance||row?.base!==s.grade.base||row?.reasons!==s.grade.reasons);
     content=`<div class="detail-score"><div><span>수행점수</span><strong>${s.grade.performance}<small> / 15</small></strong></div><span class="equation">+</span><div><span>기본점수</span><strong>${s.grade.base}</strong></div><span class="equation">=</span><div class="total"><span>${pendingCount(s.grade)?'잠정 총점':'총점'}</span><strong>${s.grade.total}<small>점</small></strong></div><div class="detail-record">${s.demo?'<span class="badge">예시 작품 · 저장 안 함</span>':recorded(s)?'<span class="badge green">성적표에 기록됨</span>':`<button class="button primary small" data-action="record" data-key="${h(s.key)}">${icon('table-properties')} 성적표에 기록</button>`}${!s.student?`<button class="text-button" data-action="identify" data-key="${h(s.key)}">학번·이름 입력하기</button>`:''}</div></div>
+      ${needsRegrade(s.grade)?'<div class="banner warning">이전 버전의 결과입니다. 원본 학생 파일을 다시 채점해야 확정할 수 있습니다.</div>':''}
       ${manual?'<div class="banner info">성적표에 수동 수정한 값이 있습니다. 아래는 자동 채점 및 항목 판정 결과입니다.</div>':''}
       ${s.grade.naming.length?`<div class="banner warning"><strong>변수명 −1점</strong><span>${s.grade.naming.map(h).join('<br>')}<small>여러 이름 문제도 한 번만 감점합니다.</small></span></div>`:''}
       ${s.grade.notices.length?`<div class="structure-notice"><strong>${icon('triangle-alert')} 프로그램 구조 확인</strong><ul>${s.grade.notices.map(n=>`<li>${h(n)}</li>`).join('')}</ul><button class="button ${s.grade.acknowledged?'secondary':'primary'} small" data-action="acknowledge" data-key="${h(s.key)}">${icon('check')}${s.grade.acknowledged?'확인 완료 · 다시 검토':'구조를 확인했습니다'}</button></div>`:''}
       <div class="detail-columns"><section><h3>항목별 판정 <span>13개 기준</span></h3><div class="criteria-list">${s.grade.criteria.map(c=>{
         const deduction=c.decision==='accept'?0:c.decision==='deduct'?c.max:c.deduction;
         const pending=c.review&&!c.decision;
-        return `<div class="criterion ${pending?'needs-review':deduction?'failed':'passed'}"><span class="criterion-number">${numerals[c.id-1]}</span><div class="criterion-body"><div class="criterion-heading"><strong>${h(c.label)}</strong><span class="criterion-points">${pending?'검토 필요':deduction?`−${deduction}점`:'통과'}</span></div>${pending?`<p>${h(c.review)} <b>불인정 시 −${c.max}점</b></p>`:deduction?`<p>${h(c.reason)}</p>`:''}<div class="decision-buttons"><button class="${c.decision==='accept'?'chosen':''}" data-action="decide" data-id="${c.id}" data-decision="accept" aria-pressed="${c.decision==='accept'}">인정</button><button class="${c.decision==='deduct'?'chosen deduct-choice':''}" data-action="decide" data-id="${c.id}" data-decision="deduct" aria-pressed="${c.decision==='deduct'}">감점 −${c.max}</button>${c.decision?`<button data-action="decide" data-id="${c.id}" data-decision="auto">자동 판정으로</button>`:''}</div></div></div>`;
+        return `<div class="criterion ${pending?'needs-review':deduction?'failed':'passed'}"><span class="criterion-number">${numerals[c.id-1]}</span><div class="criterion-body"><div class="criterion-heading"><strong>${h(c.label)}</strong><span class="criterion-points">${deduction?`−${deduction}점${pending?' · 검토 필요':''}`:pending?'검토 필요':'통과'}</span></div>${deduction?`<p class="deduction-reason">${h(c.reason)}</p>`:''}${pending?`<p>${h(c.review)} <b>불인정 시 총 −${c.max}점</b></p>`:''}<div class="decision-buttons"><button class="${c.decision==='accept'?'chosen':''}" data-action="decide" data-id="${c.id}" data-decision="accept" aria-pressed="${c.decision==='accept'}">인정</button><button class="${c.decision==='deduct'?'chosen deduct-choice':''}" data-action="decide" data-id="${c.id}" data-decision="deduct" aria-pressed="${c.decision==='deduct'}">감점 −${c.max}</button>${c.decision?`<button data-action="decide" data-id="${c.id}" data-decision="auto">자동 판정으로</button>`:''}</div></div></div>`;
       }).join('')}</div></section><section class="code-section"><div class="code-heading"><h3>블록 구조 살펴보기</h3><span>의사코드</span></div><p>모든 오브젝트의 스크립트입니다. 들여쓰기로 반복과 분기를 구분해요.</p><pre tabindex="0">${h(s.pseudocode)}</pre><div class="code-footnote">${icon('info')} 학생 코드를 실행하지 않고 블록의 구조를 분석합니다.</div></section></div>`;
   }else if(type==='student'&&s){
     title='학번·이름 확인';subtitle=s.fileName;
@@ -167,7 +185,7 @@ async function analyze(file: File,base: number): Promise<{grade:Grade;pseudocode
 }
 async function processFiles(files?: FileList|null){
   if(!files?.length||busy)return;
-  const list=Array.from(files);if(list.length>100){toast('한 번에 최대 100개 파일을 선택해 주세요.');return;}
+  const list=Array.from(files);if(list.length>1000){toast('한 번에 최대 1,000개 파일을 선택해 주세요.');return;}
   busy=true;errors=[];let completed=0,recordCount=0,firstClass:number|undefined;
   for(let i=0;i<list.length;i++){
     const file=list[i];progress=`${i+1} / ${list.length}개 분석 중`;render();
@@ -180,22 +198,22 @@ async function processFiles(files?: FileList|null){
       results.push(s);completed++;
       if(student&&firstClass===undefined)firstClass=student.classNo;
       if(recordMode){
-        if(recordSubmission(s))recordCount++;
+        if(recordSubmission(s)){recordCount++;if(recordCount%25===0)await persist();}
         else if(student)errors.push({name:file.name,message:student.grade!==notebook.settings.gradeLevel?`${student.grade}학년 파일입니다. 현재 ${notebook.settings.gradeLevel}학년 성적표에는 기록하지 않았습니다. 채점 결과는 확인할 수 있습니다.`:`${student.number}번은 현재 번호 범위 밖이라 기록하지 않았습니다. 설정에서 번호 수를 늘려 주세요.`});
       }
     }catch(e){errors.push({name:file.name,message:e instanceof Error?e.message:'알 수 없는 파일 오류'});}
   }
-  if(recordCount)persist();
+  if(recordCount)await persist();
   if(firstClass!==undefined)activeClass=firstClass;
   busy=false;view='grading';render();toast(`${completed}개 채점 완료${recordMode?` · ${recordCount}개 성적표 기록`:''}${errors.length?` · 확인할 파일 ${errors.length}개`:''}`);
 }
 async function restoreBackup(file?:File){
   if(!file)return;
   try{
-    if(file.size>10*1024*1024)throw new Error('백업 파일은 10MB 이하로 선택해 주세요.');
+    if(file.size>100*1024*1024)throw new Error('백업 파일은 100MB 이하로 선택해 주세요.');
     const data=validateNotebook(JSON.parse(await file.text()));
     if(!confirm('현재 성적표와 설정을 이 백업으로 덮어쓸까요? 현재 데이터는 먼저 백업하는 것을 권장합니다.'))return;
-    notebook=data;notebook.backedUpRevision=notebook.revision;storageBlocked=false;results=[];errors=[];persist(false);render();toast(saveError?'불러왔지만 브라우저 저장에 실패했습니다.':'백업을 불러왔습니다.');
+    notebook=data;notebook.backedUpRevision=notebook.revision;storageBlocked=false;results=[];errors=[];await persist(false);render();toast(saveError?'불러왔지만 브라우저 저장에 실패했습니다.':'백업을 불러왔습니다.');
   }catch(e){toast(e instanceof Error?e.message:'백업을 읽을 수 없습니다.');}
 }
 function backup(){
@@ -203,7 +221,7 @@ function backup(){
   download(JSON.stringify(payload,null,2),`채점노트_백업_${new Date().toISOString().slice(0,10)}.json`,'application/json');
   notebook.backedUpRevision=notebook.revision;persist(false);render();toast('백업 다운로드를 요청했습니다. 파일이 저장됐는지 확인해 주세요.');
 }
-app.addEventListener('click',e=>{
+app.addEventListener('click',async e=>{
   const target=(e.target as HTMLElement).closest<HTMLElement>('[data-action]');if(!target)return;
   const action=target.dataset.action,key=target.dataset.key;
   if(target instanceof HTMLButtonElement&&target.disabled)return;
@@ -217,7 +235,7 @@ app.addEventListener('click',e=>{
   if(action==='mode'){recordMode=target.dataset.mode==='record';render();}
   if(action==='backup')backup();
   if(action==='restore')document.querySelector<HTMLInputElement>('#restore-file')!.click();
-  if(action==='raw-backup'){download(localStorage.getItem(STORE_KEY)??JSON.stringify(notebook),'채점노트_저장원본.json','application/json');}
+  if(action==='raw-backup'){try{download(await store.raw()??JSON.stringify(notebook),'채점노트_저장원본.json','application/json');}catch{toast('저장 원본을 읽지 못했습니다. 현재 데이터를 JSON 백업으로 내보내 주세요.');}}
   if(action==='reset'){
     if(!confirm('명단·성적·검토 기록을 모두 지우고 새 성적표를 시작할까요? 먼저 JSON 백업을 내려받으세요.'))return;
     notebook=defaultNotebook();results=[];errors=[];storageBlocked=false;saveError='';persist();render();toast('새 성적표를 시작했습니다.');
@@ -247,7 +265,7 @@ app.addEventListener('click',e=>{
     s.grade=recalculate(s.grade);if(updateSubmission(s,original.grade))render();
   }
   if(action==='acknowledge'){
-    const original=selected();if(!original)return;const s=structuredClone(original);s.grade.acknowledged=!s.grade.acknowledged;
+    const original=selected();if(!original)return;const s=structuredClone(original);s.grade.acknowledged=!s.grade.acknowledged;s.grade=recalculate(s.grade);
     if(updateSubmission(s))render();
   }
 });
@@ -265,7 +283,7 @@ app.addEventListener('change',e=>{
   if(!input.checkValidity()){toast('점수 범위를 확인해 주세요. 수행은 0~15점, 기본은 0~100점입니다.');render();return;}
   const number=Number(input.dataset.number),row=structuredClone(rowAt(activeClass,number));
   if(cell==='name'||cell==='reasons')row[cell]=input.value;
-  else {row[cell]=input.value===''?undefined:Number(input.value);if(cell==='performance'&&input.value!==''){if(row.base===undefined)row.base=notebook.settings.base;if(!row.reasons||row.reasons==='Perfect'||row.reasons==='교사 수동 점수 수정')row.reasons=row.performance===15?'Perfect':'교사 수동 점수 수정';}}
+  else {row[cell]=input.value===''?undefined:Number(input.value);if(cell==='performance'&&input.value!==''){if(row.base===undefined)row.base=notebook.settings.base;if(!row.reasons||row.reasons==='Perfect'||row.reasons==='교사 수동 점수 수정')row.reasons=row.performance===15?(row.submission&&pendingCount(row.submission.grade)?'검토 필요 (확정 전)':'Perfect'):'교사 수동 점수 수정';}}
   setRow(activeClass,number,row);persist();render();
 });
 app.addEventListener('submit',async e=>{
@@ -315,5 +333,11 @@ app.addEventListener('keydown',e=>{
   const target=e.target as HTMLElement;
   if((e.key==='Enter'||e.key===' ')&&target.matches('.dropzone,.result-row')){e.preventDefault();target.click();}
 });
-window.addEventListener('beforeunload',e=>{if(saveError||results.some(s=>!s.demo&&!recorded(s))){e.preventDefault();e.returnValue='';}});
-render();
+window.addEventListener('beforeunload',e=>{if(saveError||pendingSaves||results.some(s=>!s.demo&&!recorded(s))){e.preventDefault();e.returnValue='';}});
+async function bootstrap() {
+  app.innerHTML='<div class="loading-screen" role="status">채점노트 성적표를 불러오는 중…</div>';
+  try { notebook=await store.load()??notebook; }
+  catch { storageBlocked=true;saveError='기존 저장 데이터를 읽지 못했습니다. 원본은 보존했으며 새 변경은 저장되지 않습니다. 사용 안내에서 저장 원본을 내려받고 정상 백업을 불러와 주세요.'; }
+  render();
+}
+void bootstrap();

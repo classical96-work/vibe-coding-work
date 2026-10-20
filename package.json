@@ -1,6 +1,6 @@
 {
   "name": "entry-grading-notebook",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,8 @@
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
     "test:ui": "node scripts/browser-smoke.mjs",
-    "publish:pages": "npm run build && node scripts/publish-pages.mjs"
+    "publish:pages": "npm run build && node scripts/publish-pages.mjs",
+    "test:feedback": "node scripts/feedback-smoke.mjs"
   },
   "dependencies": {
     "exceljs": "^4.4.0",
@@ -19,6 +20,7 @@
   "devDependencies": {
     "@playwright/test": "^1.56.0",
     "@types/node": "^26.6.5",
+    "fake-indexeddb": "^6.2.6",
     "typescript": "^5.9.3",
     "vite": "^6.4.1",
     "vite-plugin-singlefile": "^2.3.4",

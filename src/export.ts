@@ -1,15 +1,16 @@
+import { pendingCount,needsRegrade } from './grader';
 import type { Notebook } from './types';
 export function download(data: BlobPart, fileName: string, type: string) {
   const url = URL.createObjectURL(new Blob([data],{type}));
   const a = document.createElement('a'); a.href = url; a.download = fileName; a.click();
   setTimeout(() => URL.revokeObjectURL(url),1000);
 }
-const headings = ['번호','이름','수행점수(15)','기본점수','총점','감점사유'];
+const headings = ['번호','이름','수행점수(15)','기본점수','총점','감점사유','판정상태'];
 export function sheetRows(notebook: Notebook, classNo: number): (string | number)[][] {
   const rows = notebook.classes[classNo] ?? {};
   return [headings,...Array.from({length:notebook.settings.rows},(_,i) => {
     const r = rows[i+1];
-    return [i+1,r?.name ?? '',r?.performance ?? '',r?.base ?? '',r?.performance === undefined ? '' : r.performance + (r.base ?? 0),r?.reasons ?? ''];
+    return [i+1,r?.name ?? '',r?.performance ?? '',r?.base ?? '',r?.performance === undefined ? '' : r.performance + (r.base ?? 0),r?.reasons === 'Perfect' && r.submission && pendingCount(r.submission.grade) ? r.submission.grade.reasons : r?.reasons ?? '',r?.performance === undefined ? '미채점' : r.submission && needsRegrade(r.submission.grade) ? '이전 버전 · 재채점 필요' : r.submission && pendingCount(r.submission.grade) ? '검토 필요 · 잠정 점수' : '확인 완료'];
   })];
 }
 export function csvCell(v: string | number): string {
@@ -30,12 +31,12 @@ export async function exportScores(notebook: Notebook, format: 'csv'|'xlsx', sco
   for (const c of classes) {
     const ws = workbook.addWorksheet(`${c}반`);
     ws.addRows(sheetRows(notebook,c));
-    ws.columns = [{width:8},{width:16},{width:18},{width:14},{width:12},{width:65}];
+    ws.columns = [{width:8},{width:16},{width:18},{width:14},{width:12},{width:65},{width:28}];
     ws.getRow(1).font = {bold:true,color:{argb:'FFFFFFFF'}};
     ws.getRow(1).fill = {type:'pattern',pattern:'solid',fgColor:{argb:'FF176B50'}};
     ws.getColumn(6).alignment = {wrapText:true,vertical:'top'};
     ws.views = [{state:'frozen',ySplit:1}];
-    ws.autoFilter = `A1:F${notebook.settings.rows+1}`;
+    ws.autoFilter = `A1:G${notebook.settings.rows+1}`;
   }
   const buf = await workbook.xlsx.writeBuffer();
   download(new Uint8Array(buf),`채점노트_${suffix}.xlsx`,'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
