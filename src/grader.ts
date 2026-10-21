@@ -2,7 +2,7 @@ import type { Block, Criterion, Grade, Project, Variable } from './types';
 import { introductionMeaning } from './introduction';
 import { expressionBlocks, isBlock, literal, walk } from './parser';
 const labels = ['시작 버튼으로 게임 시작','정답 변수 숨기기','1~10 난수를 정답에 저장','정답횟수 0으로 초기화','숫자맞추기 시작 안내','반복 안에서 숫자 입력','정답일 때 정답 안내','입력이 작을 때 큰 수 안내','입력이 클 때 작은 수 안내','모든 입력의 횟수 +1','종료 후 시도 횟수 안내','오답이면 계속 반복','정답이면 반복 종료'];
-export const ENGINE_VERSION = '1.3.0';
+export const ENGINE_VERSION = '1.3.1';
 export const needsRegrade = (grade: Grade) => grade.engineVersion !== ENGINE_VERSION;
 export const numerals = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬'];
 const compact = (s: string) => s.replace(/\s/g, '');
@@ -140,8 +140,8 @@ export function gradeProject(project: Project, base = 10): Grade {
   if (!correct.every(correctNotice)) fail(7,'정답 분기의 정답 안내 또는 유효한 정답 비교 없음');
   const direction = (s: string): -1 | 0 | 1 | undefined => {
     const text = compact(s);
-    if (/^(큼|작음)[.!~]*$/.test(text) || /^정답보다/.test(text) || /않|아니|아닙|말고/.test(text)) return 0;
-    const big = /큽|크|커|큰|높/.test(text), small = /작|낮/.test(text);
+    if (/^정답보다/.test(text) || /않|아니|아닙|말고/.test(text)) return 0;
+    const big = /큽|큼|크|커|큰|높/.test(text), small = /작|낮/.test(text);
     if (big === small) return undefined;
     const d = big ? 1 : -1;
     return !/^정답/.test(text) && /^(입력|너의|네가|대답)/.test(text) && !/보다정답/.test(text) ? -d as -1 | 1 : d;
@@ -150,7 +150,7 @@ export function gradeProject(project: Project, base = 10): Grade {
   const hints = (p: Trace) => says(p.events.filter(b => hintSpeeches.has(b))).map(direction);
   for (const [id, traces, desired] of [[8,wrongLow,1],[9,wrongHigh,-1]] as const) {
     if (!goodDirections || !traces.every(p => hints(p).includes(desired) && !hints(p).includes(-desired as -1 | 1))) {
-      if (goodDirections && traces.every(p => hints(p).some(d => d === desired || d === 0) && !hints(p).includes(-desired as -1 | 1))) review(id,'큼/작음 안내의 주어가 모호합니다. 방향이 맞는지 확인해 주세요.');
+      if (goodDirections && traces.every(p => hints(p).some(d => d === desired || d === 0) && !hints(p).includes(-desired as -1 | 1))) review(id,'크다·작다 안내의 주어가 모호합니다. 방향이 맞는지 확인해 주세요.');
       else fail(id,goodDirections ? '크다/작다 안내가 없거나 방향이 잘못됨' : '크기 비교 대상이 정답과 대답이 아님');
     }
   }

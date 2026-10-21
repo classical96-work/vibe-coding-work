@@ -37,7 +37,7 @@ describe('실행 경로와 불확실성',()=>{
  it('다른 오브젝트의 숨기기도 검사',()=>{const p=demoProject();const hide=thread(p).splice(1,1)[0];p.objects.push({name:'교실',script:[[b('when_run_button_click'),hide]]});expect(gradeProject(p).performance).toBe(15);});
  it('이름으로 삭제된 변수 ID를 대체하지 않음',()=>{const p=demoProject();(eq(p).params![0] as any).params[0]=v('deleted');expect(gradeProject(p).criteria[6].deduction).toBe(1);});
  it('모호한 안내는 무감점 검토',()=>{const p=demoProject();thread(p)[3]=say('내가 낸 문제를 맞춰봐');const g=gradeProject(p);expect(g.performance).toBe(15);expect(g.criteria[4].review).toBeTruthy();g.criteria[4].decision='deduct';expect(recalculate(g).performance).toBe(13);});
- it('큼/작음은 검토',()=>{const p=demoProject();direction(p).statements=[[say('큼')],[say('작음')]];const g=gradeProject(p);expect(g.performance).toBe(15);expect(pendingCount(g)).toBe(2);});
+ it('큼/작음도 감점·검토 없이 인정',()=>{const p=demoProject();direction(p).statements=[[say('큼')],[say('작음')]];const g=gradeProject(p);expect(g.performance).toBe(15);expect(pendingCount(g)).toBe(0);expect(g.reasons).toBe('Perfect');});
  it('중복 게임은 검토',()=>{const p=demoProject();p.objects.push({name:'중복',script:p.objects[0].script});expect(gradeProject(p).notices.length).toBeGreaterThan(0);});
  it('단일 변수명 문제는 수행에서 한 번만 감점',()=>{const p=demoProject();p.variables[0].name='답';rename(p,'시도');expect(gradeProject(p).performance).toBe(14);});
  it('알 수 없는 제어 블록은 자동 확정하지 않음',()=>{const p=demoProject();thread(p).push(b('stop_run'));expect(pendingCount(gradeProject(p))).toBeGreaterThan(0);});
