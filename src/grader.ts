@@ -2,7 +2,7 @@ import type { Block, Criterion, Grade, Project, Variable } from './types';
 import { introductionMeaning } from './introduction';
 import { expressionBlocks, isBlock, literal, walk } from './parser';
 const labels = ['시작 버튼으로 게임 시작','정답 변수 숨기기','1~10 난수를 정답에 저장','정답횟수 0으로 초기화','숫자맞추기 시작 안내','반복 안에서 숫자 입력','정답일 때 정답 안내','입력이 작을 때 큰 수 안내','입력이 클 때 작은 수 안내','모든 입력의 횟수 +1','종료 후 시도 횟수 안내','오답이면 계속 반복','정답이면 반복 종료'];
-export const ENGINE_VERSION = '1.3.1';
+export const ENGINE_VERSION = '1.3.2';
 export const needsRegrade = (grade: Grade) => grade.engineVersion !== ENGINE_VERSION;
 export const numerals = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬'];
 const compact = (s: string) => s.replace(/\s/g, '');
@@ -119,8 +119,8 @@ export function gradeProject(project: Project, base = 10): Grade {
   if (walk(body).some(b => b.type === 'set_variable' && isVar(b, counter))) fail(4,'반복 안에서 정답횟수를 다시 설정함');
   const intros = says(before).map(introductionMeaning);
   if (!intros.includes('accept')) {
-    if (intros.includes('review')) review(5,'숫자맞추기 안내인지 문구만으로 확인하기 어렵습니다. 숫자를 맞히라는 의미이면 인정해 주세요. 정확한 문장이나 범위 표기는 필요하지 않습니다.');
-    else fail(5,'숫자를 맞혀 보라는 의미의 시작 안내 없음');
+    if (intros.includes('review')) review(5,'숫자맞추기 안내인지 문구만으로 확인하기 어렵습니다. 숫자를 맞히라는 뜻이거나 숫자·범위를 제시하며 입력을 요청하면 인정해 주세요. 정확한 문장은 필요하지 않습니다.');
+    else fail(5,'숫자맞추기 또는 숫자·범위를 제시한 입력 시작 안내 없음');
   }
   const validComparison = (v: unknown) => {
     const c = comparison(v);
@@ -155,12 +155,14 @@ export function gradeProject(project: Project, base = 10): Grade {
     }
   }
   const inputCount = (p: Trace) => {
-    let sum = 0, asks = 0, beforeAsk = false;
+    let sum = 0, asks = 0;
     for (const b of p.events) {
       if (b.type === 'ask_and_wait') asks++;
-      if (b.type === 'change_variable' && isVar(b, counter)) { if (!asks) beforeAsk = true; sum += Number(literal(params(b)[1])); }
+      if (b.type === 'change_variable' && isVar(b, counter)) sum += Number(literal(params(b)[1]));
     }
-    return asks === 1 && sum === 1 && !beforeAsk;
+    // Paths already stop at a repeat break. One increment per input counts
+    // equally before or after waiting, including the final correct input.
+    return asks === 1 && sum === 1;
   };
   if (!allPaths.every(inputCount)) {
     if (wrongLow.every(inputCount) && wrongHigh.every(inputCount) && !correct.every(inputCount)) fail(10,'마지막 정답 입력을 횟수에 포함하지 않음',1);
