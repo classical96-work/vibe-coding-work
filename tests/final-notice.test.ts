@@ -5,7 +5,7 @@ import {gradeProject,pendingCount} from '../src/grader';
 import {parseEnt} from '../src/parser';
 import {archiveProject} from './archive';
 
-const endings=['번 만에 맞췄습니다.','번만에 맞췄습니다!','번 만에 맞췄습니다!!','번 만에 맞췄습니다！！！','번 만에 맞췄습니다~','번 만에 맞췄습니다 😊','회 만에 맞췄습니다!','번 만에 맞췄습니다'];
+const endings=['번 만에 맞췄습니다.','번만에 맞췄습니다!','번 만에 맞췄습니다!!','번 만에 맞췄습니다！！！','번 만에 맞췄습니다~','번 만에 맞췄습니다 😊','회 만에 맞췄습니다!','번 만에 맞췄습니다','뻔만에 맟췃습니다!!!','맞췃습니다!','시도해서 성공했어요!'];
 describe('⑪ 횟수 안내의 끝 문장부호로 감점하지 않음',()=>{
  for(const env of ['FINAL_NOTICE_ENT','FINAL_NOTICE_EXCLAMATION_ENT'])it.skipIf(!process.env[env])(`사용자 제보 실제 파일 ${env}: 전 항목 만점`,()=>{
   const p=parseEnt(new Uint8Array(readFileSync(process.env[env]!))),g=gradeProject(p);
@@ -16,6 +16,19 @@ describe('⑪ 횟수 안내의 끝 문장부호로 감점하지 않음',()=>{
   const p=demoProject();p.objects[0].script[0][5]=say(b('combine_something',[null,v('count'),null,text(ending),null]));
   const g=gradeProject(parseEnt(archiveProject(p)));
   expect(g.criteria[10].deduction).toBe(0);expect(g.criteria[10].review).toBeUndefined();expect(g.performance).toBe(15);expect(pendingCount(g)).toBe(0);
+ });
+ it('횟수를 합쳐 말하는 블록이 있고 문구만 불명확하면 자동 감점하지 않음',()=>{
+  const p=demoProject();p.objects[0].script[0][5]=say(b('combine_something',[null,v('count'),null,text('가나다!'),null]));
+  const g=gradeProject(p);expect(g.criteria[10].deduction).toBe(0);expect(g.criteria[10].review).toBeTruthy();expect(g.reasons).not.toBe('Perfect');
+ });
+ it('횟수 변수 없이 고정 문장만 말하면 감점 유지',()=>{
+  const p=demoProject();p.objects[0].script[0][5]=say('3번 만에 맞췄습니다!');expect(gradeProject(p).criteria[10].deduction).toBe(1);
+ });
+ it('시작·정답·힌트·종료 안내의 문장부호와 띄어쓰기 차이 모두 인정',()=>{
+  const p=demoProject(),t=p.objects[0].script[0];t[3]=say('「숫짜」를 맟춰봐！！！');
+  const eq=t[4].statements![0][2];eq.statements![0][0]=say('정 닶 입 니 다!!!');
+  eq.statements![1][0].statements=[[say('“입력한 수가 정답보다 작슴니다!”')],[say('“입력한 수가 정답보다 큽니당!”')]];
+  const g=gradeProject(p);expect(g.reasons).toBe('Perfect');expect(pendingCount(g)).toBe(0);
  });
  it.skipIf(!process.env.SAMPLE_ENT)('기존 실제 샘플의 마지막 안내에 느낌표를 붙여도 점수가 같음',()=>{
   const p=parseEnt(new Uint8Array(readFileSync(process.env.SAMPLE_ENT!)));

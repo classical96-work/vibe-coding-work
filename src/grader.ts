@@ -1,15 +1,17 @@
 import type { Block, Criterion, Grade, Project, Variable } from './types';
 import { introductionMeaning } from './introduction';
+import { normalizeSpeech } from './speech';
 import { expressionBlocks, isBlock, literal, walk } from './parser';
 const labels = ['시작 버튼으로 게임 시작','정답 변수 숨기기','1~10 난수를 정답에 저장','정답횟수 0으로 초기화','숫자맞추기 시작 안내','반복 안에서 숫자 입력','정답일 때 정답 안내','입력이 작을 때 큰 수 안내','입력이 클 때 작은 수 안내','모든 입력의 횟수 +1','종료 후 시도 횟수 안내','오답이면 계속 반복','정답이면 반복 종료'];
-export const ENGINE_VERSION = '1.3.2';
+export const ENGINE_VERSION = '1.3.3';
 export const needsRegrade = (grade: Grade) => grade.engineVersion !== ENGINE_VERSION;
 export const numerals = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬'];
 const compact = (s: string) => s.replace(/\s/g, '');
 const params = (b: Block) => b.params ?? [];
 const ref = (v: unknown): string | undefined => isBlock(v) && v.type === 'get_variable' ? String(v.params?.[0]) : undefined;
 const speak = (b: Block) => ['dialog_time','dialog'].includes(b.type) && !params(b).includes('think');
-const says = (bs: Block[]) => bs.filter(speak).map(b => literal(params(b)[0]));
+const spokenText = (b: Block) => normalizeSpeech(literal(params(b)[0]));
+const says = (bs: Block[]) => bs.filter(speak).map(spokenText);
 const contains = (b: Block, t: string) => expressionBlocks(params(b)[0]).some(e => e.type === t);
 interface Trace { events: Block[]; stopped: boolean; uncertain: boolean; compared: boolean }
 function comparison(v: unknown) {
@@ -135,11 +137,11 @@ export function gradeProject(project: Project, base = 10): Grade {
   // A correct branch can be the remaining else after LESS and GREATER.
   // Its positive message must be reachable for equality and absent from both wrong-input paths.
   const wrongSpeech = new Set([...wrongLow, ...wrongHigh].flatMap(p => p.events.filter(speak)));
-  const correctPhrase = (b: Block) => speak(b) && /정답/.test(literal(params(b)[0])) && !/아니|아닙|오답|틀렸/.test(literal(params(b)[0]));
+  const correctPhrase = (b: Block) => speak(b) && /정답/.test(compact(spokenText(b))) && !/아니|아닙|오답|틀렸/.test(compact(spokenText(b)));
   const correctNotice = (p: Trace) => p.compared && p.events.some(b => correctPhrase(b) && !wrongSpeech.has(b));
   if (!correct.every(correctNotice)) fail(7,'정답 분기의 정답 안내 또는 유효한 정답 비교 없음');
   const direction = (s: string): -1 | 0 | 1 | undefined => {
-    const text = compact(s);
+    const text = compact(normalizeSpeech(s));
     if (/^정답보다/.test(text) || /않|아니|아닙|말고/.test(text)) return 0;
     const big = /큽|큼|크|커|큰|높/.test(text), small = /작|낮/.test(text);
     if (big === small) return undefined;
@@ -168,7 +170,17 @@ export function gradeProject(project: Project, base = 10): Grade {
     if (wrongLow.every(inputCount) && wrongHigh.every(inputCount) && !correct.every(inputCount)) fail(10,'마지막 정답 입력을 횟수에 포함하지 않음',1);
     else fail(10,'입력마다 정답횟수를 정확히 1 증가시키지 않음');
   }
-  if (!after.some(b => speak(b) && contains(b,'combine_something') && expressionBlocks(params(b)[0]).some(e => e.type === 'get_variable' && isVar(e,counter)) && /번|회/.test(literal(params(b)[0])))) fail(11,'반복 종료 뒤 횟수를 합쳐 말하는 안내 없음');
+  const countNotices = after.filter(b => speak(b) && contains(b,'combine_something') && expressionBlocks(params(b)[0]).some(e => e.type === 'get_variable' && isVar(e,counter)));
+  const countWording = (b: Block) => {
+    // Inspect literal message text, not variable IDs. Neither a fixed sentence
+    // ending nor exact spelling of the counting unit is required.
+    const words=expressionBlocks(params(b)[0]).filter(e=>e.type==='text').map(e=>literal(e)).join('');
+    return /번|뻔|회|시도|횟|맞[췄췃추춰혀혔]|마[췄췃]|성공|정답/.test(compact(normalizeSpeech(words)));
+  };
+  if (!countNotices.some(countWording)) {
+    if(countNotices.length)review(11,'횟수 변수를 합쳐 말하는 블록은 있습니다. 문구의 뜻만 확인해 주세요. 맞춤법·문장부호·띄어쓰기는 감점 사유가 아닙니다.');
+    else fail(11,'반복 종료 뒤 횟수 변수를 합쳐 말하는 블록 없음');
+  }
   if (!loop || ![...wrongLow,...wrongHigh].every(p => !p.stopped)) fail(12,'오답에서 반복이 종료되거나 반복문 없음');
   if (!loop || !correct.every(p => p.stopped)) fail(13,'정답 분기에 반복 종료 없음');
   if (allPaths.some(p => p.uncertain)) {

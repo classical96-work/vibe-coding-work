@@ -1,10 +1,9 @@
+import { normalizeSpeech } from './speech';
 /** Deterministic recognition of a number-guessing introduction, independent of the random range. */
 export function introductionMeaning(message: string): 'accept'|'review'|'reject' {
   // Normalize recognizable misspellings of the guessing verb only. Keep the
   // numeric target, invitation ending and negation checks below intact.
-  const raw=message.normalize('NFKC')
-    .replace(/[맟맛](?=[추춰췄혀히쳐처춤])/g,'맞')
-    .replace(/(맞|마)췄(?=\s*(?:봐|보|볼))/g,'$1춰');
+  const raw=normalizeSpeech(message);
   const s=raw.replace(/\s/g,'');
   const numeric=/숫자|정수|자연수|number/i.test(s)
     || /(?:생각한|고른|골라둔|정한|선택한|어떤|무슨|아무|그|이)수(?:를|가|는|나|중|인지|일|맞|하나|뭐)/.test(s)
