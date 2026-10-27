@@ -2,8 +2,8 @@ import type { Block, Criterion, Grade, Project, Variable } from './types';
 import { introductionMeaning } from './introduction';
 import { normalizeSpeech } from './speech';
 import { expressionBlocks, isBlock, literal, walk } from './parser';
-const labels = ['시작 버튼으로 게임 시작','정답 변수 숨기기','1~10 난수를 정답에 저장','정답횟수 0으로 초기화','숫자맞추기 시작 안내','반복 안에서 숫자 입력','정답일 때 정답 안내','입력이 작을 때 큰 수 안내','입력이 클 때 작은 수 안내','모든 입력의 횟수 +1','종료 후 시도 횟수 안내','오답이면 계속 반복','정답이면 반복 종료'];
-export const ENGINE_VERSION = '1.3.3';
+const labels = ['시작 버튼으로 게임 시작','정답 변수 숨기기','1~10 난수를 정답에 저장','정답횟수 0으로 초기화','숫자맞추기 시작 안내','반복 안에서 숫자 입력','정답일 때 정답 안내','입력이 작을 때 큰 수 안내','입력이 클 때 작은 수 안내','모든 입력의 횟수 +1','정답 후 시도 횟수 안내','오답이면 계속 반복','정답이면 반복 종료'];
+export const ENGINE_VERSION = '1.3.4';
 export const needsRegrade = (grade: Grade) => grade.engineVersion !== ENGINE_VERSION;
 export const numerals = ['①','②','③','④','⑤','⑥','⑦','⑧','⑨','⑩','⑪','⑫','⑬'];
 const compact = (s: string) => s.replace(/\s/g, '');
@@ -170,16 +170,25 @@ export function gradeProject(project: Project, base = 10): Grade {
     if (wrongLow.every(inputCount) && wrongHigh.every(inputCount) && !correct.every(inputCount)) fail(10,'마지막 정답 입력을 횟수에 포함하지 않음',1);
     else fail(10,'입력마다 정답횟수를 정확히 1 증가시키지 않음');
   }
-  const countNotices = after.filter(b => speak(b) && contains(b,'combine_something') && expressionBlocks(params(b)[0]).some(e => e.type === 'get_variable' && isVar(e,counter)));
+  const isCountNotice = (b: Block) => speak(b) && contains(b,'combine_something') && expressionBlocks(params(b)[0]).some(e => e.type === 'get_variable' && isVar(e,counter));
+  const outsideNotices = after.filter(isCountNotice);
+  // A success-only message before stop_repeat is equivalent to a message
+  // after the loop. Trace events exclude blocks after an executed break.
+  const countNotices = correct.map(p => [...outsideNotices,...p.events.filter((b,i) =>
+    p.compared && isCountNotice(b) && !wrongSpeech.has(b)
+    && p.events.slice(0,i).some(e=>e.type==='ask_and_wait')
+    && !p.events.slice(i+1).some(e=>isVar(e,counter) && (e.type==='set_variable' || (e.type==='change_variable' && Number(literal(params(e)[1]))!==0)))
+  )]);
   const countWording = (b: Block) => {
     // Inspect literal message text, not variable IDs. Neither a fixed sentence
     // ending nor exact spelling of the counting unit is required.
     const words=expressionBlocks(params(b)[0]).filter(e=>e.type==='text').map(e=>literal(e)).join('');
     return /번|뻔|회|시도|횟|맞[췄췃추춰혀혔]|마[췄췃]|성공|정답/.test(compact(normalizeSpeech(words)));
   };
-  if (!countNotices.some(countWording)) {
-    if(countNotices.length)review(11,'횟수 변수를 합쳐 말하는 블록은 있습니다. 문구의 뜻만 확인해 주세요. 맞춤법·문장부호·띄어쓰기는 감점 사유가 아닙니다.');
-    else fail(11,'반복 종료 뒤 횟수 변수를 합쳐 말하는 블록 없음');
+  if (!countNotices.every(xs=>xs.some(countWording))) {
+    if(countNotices.every(xs=>xs.length))review(11,'횟수 변수를 합쳐 말하는 블록은 있습니다. 문구의 뜻만 확인해 주세요. 맞춤법·문장부호·띄어쓰기는 감점 사유가 아닙니다.');
+    else if(correct.some(p=>p.uncertain)&&countNotices.some(xs=>xs.length))review(11,'지원하지 않는 조건식 때문에 정답 후 횟수 안내가 항상 실행되는지 확정할 수 없습니다. 직접 확인해 주세요.');
+    else fail(11,'정답 후 마지막 입력까지 포함한 횟수를 합쳐 말하는 안내 없음');
   }
   if (!loop || ![...wrongLow,...wrongHigh].every(p => !p.stopped)) fail(12,'오답에서 반복이 종료되거나 반복문 없음');
   if (!loop || !correct.every(p => p.stopped)) fail(13,'정답 분기에 반복 종료 없음');

@@ -1,12 +1,15 @@
 import {chromium} from '@playwright/test';
 import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
+import {basename} from 'node:path';
 
 const helper=process.env.CHROMIUM_HELPER?(await import(process.env.CHROMIUM_HELPER)).default:undefined;
 const browser=await chromium.launch(helper?{executablePath:await helper.executablePath(),args:helper.args.filter(a=>a!=='--single-process'),headless:true}:{headless:true});
 try {
- for(const env of ['FINAL_NOTICE_ENT','FINAL_NOTICE_EXCLAMATION_ENT']){
+ for(const env of ['FINAL_NOTICE_ENT','FINAL_NOTICE_EXCLAMATION_ENT',...(process.env.INLINE_NOTICE_ENT?['INLINE_NOTICE_ENT']:[])]){
   assert.ok(process.env[env],`Set ${env} to the reported .ent file`);
+  const id=basename(process.env[env]).match(/[1-3](0[1-9])(0[1-9]|[1-9]\d)/);
+  assert.ok(id);const classNo=Number(id[1]),number=Number(id[2]);
   const context=await browser.newContext({acceptDownloads:true,viewport:{width:1440,height:1100}});
   try {
    const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
@@ -24,12 +27,13 @@ try {
    await page.getByRole('button',{name:'닫기',exact:true}).click();
    await page.getByRole('button',{name:'반별 성적표',exact:true}).click();
    await page.reload();await page.getByRole('button',{name:'반별 성적표',exact:true}).click();
-   assert.equal(await page.getByRole('spinbutton',{name:'22번 수행점수',exact:true}).inputValue(),'15');
-   assert.equal(await page.getByRole('textbox',{name:'22번 감점사유',exact:true}).inputValue(),'Perfect');
+   await page.getByRole('button',{name:`${classNo}반`,exact:true}).click();
+   assert.equal(await page.getByRole('spinbutton',{name:`${number}번 수행점수`,exact:true}).inputValue(),'15');
+   assert.equal(await page.getByRole('textbox',{name:`${number}번 감점사유`,exact:true}).inputValue(),'Perfect');
    await page.getByRole('button',{name:'성적표 내려받기',exact:true}).click();await page.locator('[name="format"]').selectOption('csv');
    const waiting=page.waitForEvent('download');await page.getByRole('button',{name:'내려받기',exact:true}).click();
    const csv=await readFile(await (await waiting).path(),'utf8');
-   assert.match(csv.split('\r\n')[22],/"15","10","25","Perfect","확인 완료"/);
+   assert.match(csv.split('\r\n')[number],/"15","10","25","Perfect","확인 완료"/);
    assert.deepEqual(errors,[]);
    console.log(`${env}: actual upload + Worker + all 13 criteria + saved/reloaded gradebook + CSV = 15/25 Perfect`);
   }finally{await context.close();}
